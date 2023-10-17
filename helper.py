@@ -57,14 +57,17 @@ def twoLocalFieldReduction(eq1, assumptions, coefficients, debug=False):
                     n += 1
                 else:
                     x3 = x3 * elem
-        x4 = symbols(f"c{runningNumber}")
-        coefficients.append(symbols(f"c{runningNumber}"))
+        x4 = symbols(f"t{runningNumber}")
+        coefficients.append(symbols(f"t{runningNumber}"))
         runningNumber += 1
 
         if debug:
             print(f"No:{actions} first: {x1}, second: {x2}, third: {x3}, fourth: {x4}")
             actions += 1
-        eq1 = eq1.subs(x1 * x2 * x3, (x4 * x3 + 2 * (x1 * x2 - 2 * x1 * x4 - 2 * x2 * x4 + 3 * x4)))
+        if isinstance(val.args[0], Integer) and val.args[0] < 0:
+            eq1 = eq1.subs(-(x1 * x2 * x3), (-x4 * x3 + 2 * (x1 * x2 - 2 * x1 * x4 - 2 * x2 * x4 + 3 * x4)))
+        else:
+            eq1 = eq1.subs(x1 * x2 * x3, (x4 * x3 + 2 * (x1 * x2 - 2 * x1 * x4 - 2 * x2 * x4 + 3 * x4)))
         assumptions.append(Eq(x4, x1 * x2))
         eq1 = eq1.expand()
 
