@@ -1,17 +1,33 @@
-import math
-from sympy import symbols, Eq, Add, Integer, Symbol, Mul, Pow, Wild
 from dwave.system import DWaveSampler, EmbeddingComposite
 from helper import *
-from numpy import prod
+
 
 debug = True
 
-num = 15
+num = 4489
+l_num = num.bit_length()
 numFactors = 2
-l1 = math.floor((math.log2(num) + 1) / 2)
-l2 = math.ceil((math.log2(num) + 1) / 2)
+num_bits = []
+#l_p = math.floor((math.log2(num) + 1) / 2)
+#l_q = math.floor((math.log2(num) + 1) / 2)
+l_p = 7
+l_q = 7
 
-lengths = [4, 5]
+p = []
+q = []
+
+lengths = [l_p, l_q]
+
+for i in range(l_num):
+    num_bits.append((num >> i) & 1)
+
+for i in range(l_p):
+    p.append(symbols(f"p{i}"))
+
+for i in range(l_q):
+    q.append(symbols(f"q{i}"))
+
+
 if debug:
     counterLength = 0
     for i in lengths:
@@ -38,43 +54,66 @@ print(eq1)
 print(coefficients)
 """
 
-eq1, coefficients = constructEquation(num, lengths)
-print(eq1)
+eq, coefficients = constructEquation(num, lengths)
+print(eq)
 print(coefficients)
 
-"""
-if num & (1 << 0):
-    eq1 = eq1.subs({Symbol('p1'): 1, Symbol('q1'): 1})
+
+if num_bits[0]:
+    eq = eq.subs({Symbol('p0'): 1, Symbol('q0'): 1})
     p[0] = 1
     q[0] = 1
-    coefficients.remove(Symbol('p1'))
-    coefficients.remove(Symbol('q1'))
-"""
+    coefficients.remove(Symbol("p0"))
+    coefficients.remove(Symbol("q0"))
+    if debug:
+        print("")
+        print("Removing the First Bits")
+        print(eq)
+        print(coefficients)
+        print("")
 
-eq1 = eq1.expand()
 
+
+if num_bits[l_num - 1]:
+    eq = eq.subs({Symbol(f"p{l_p - 1}"): 1, Symbol(f"q{l_q - 1}"): 1})
+    p[l_p - 1] = 1
+    q[l_q - 1] = 1
+    coefficients.remove(Symbol(f"p{l_p - 1}"))
+    coefficients.remove(Symbol(f"q{l_q - 1}"))
+    if debug:
+        print("")
+        print("Removing the Last Bits")
+        print(eq)
+        print(coefficients)
+        print("")
+
+
+substitutions, coefficients = createSubstitutionList(eq, coefficients, p, q, debug)
+print(substitutions)
+eq = eq.expand()
+print(eq)
 # Substitute xn**2 with xn where xn is every possible Symbol
-eq1 = substituteExponent(eq1, coefficients, debug)
+eq = substituteExponent(eq, coefficients, debug)
+
+print(eq)
 
 # Reduce the local Fields to have a maximum of 2 coefficients and save the constraints
 assumptions = []
-eq1, assumptions, coefficients = twoLocalFieldReduction(eq1, assumptions, coefficients, debug)
+eq = twoLocalFieldReduction(eq, substitutions, debug)
 
 
 for val in coefficients:
-    eq1 = eq1.replace(val, (1 - val) / 2)
-eq1 = eq1.expand()
+    eq = eq.replace(val, (1 - val) / 2)
+eq = eq.expand()
 
 # local fields
 h = {}
 # couplings
 J = {}
 
-for val in eq1.args:
+for val in eq.args:
     if debug:
         print(f"{val}: ")
-    # if isinstance(val, Integer):
-        # eventually bias handling
     if isinstance(val, Mul):
         if len(val.args) == 2:
             if isinstance(val.args[0], Symbol):
@@ -95,47 +134,45 @@ if debug:
     print(f"local Fields: {h}")
     print(f"couplings: {J}")
     print("")
+# print(dict2ltxtab(J, coefficients))
 # send and retrieve Data from DWave solvers
+
+
 sampler = EmbeddingComposite(DWaveSampler())
-response = sampler.sample_ising(h, J, num_reads=50, annealing_time=2000)
-
-sampleNum = 0
-for sample in response.samples():
-    copyAssumptions = assumptions
-    copyEq1 = eq1
-    for val in sample:
-        # print(val, sample[val])
-        for elem in range(len(copyAssumptions)):
-            copyAssumptions[elem] = copyAssumptions[elem].subs(val, math.floor((sample[val] - 1) / -2))
-        copyEq1 = copyEq1.subs(val, math.floor((sample[val] - 1) / -2))
-        if val.name[0] == "x":
-            name = val.name
-            name = name.replace("x", "")
-            numbers[int(name)] = math.floor((sample[val] - 1) / -2)
-
-    test = True
-    for elem in copyAssumptions:
-        if not (elem):
-            test = False
+response = sampler.sample_ising(h, J, num_reads=100, annealing_time=2000)
 
 
-    print(numbers)
-    addedNumbers = [0] * len(lengths)
-    numberBits = [""] * numFactors
+print(response)
+print(response.record)
+print(response.record[0][0])
+
+for n in range(len(response.record)):
+    copy_p = p.copy()
+    copy_q = q.copy()
+    for i in range(len(copy_p)):
+        if isinstance(copy_p[i], Symbol):
+            if response.samples()[n][copy_p[i]] == 1:
+                copy_p[i] = 0
+            else:
+                copy_p[i] = 1
+
+    for i in range(len(copy_q)):
+        if isinstance(copy_q[i], Symbol):
+            if response.samples()[n][copy_q[i]] == 1:
+                copy_q[i] = 0
+            else:
+                copy_q[i] = 1
+
+    num_p = 0
+    num_q = 0
     counter = 0
-    counter2 = 0
-    for i in lengths:
-        for n in range(i):
-            addedNumbers[counter2] += numbers[counter]*2**n
-            numberBits[counter2] += numbers[counter]
-            counter += 1
-        counter2 += 1
+    for elem in copy_p:
+        num_p += elem * 2**counter
+        counter += 1
 
-# (test or sampleNum == 0) and
-    if prod(addedNumbers) == num:
-        print(f"Sample Number {sampleNum}")
+    counter = 0
+    for elem in copy_q:
+        num_q += elem * 2**counter
+        counter += 1
 
-        for elem in range(numFactors):
-            print(f"{numberBits[elem]}, {addedNumbers[elem]}")
-
-    sampleNum += 1
+    print(f"num: {n}, p: {num_p}, q: {num_q}, occ: {response.record[n][2]}")

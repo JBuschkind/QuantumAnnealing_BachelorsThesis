@@ -1,12 +1,15 @@
-from sympy import symbols, Eq, Add, Integer, Symbol, Mul, Pow, Wild, simplify
+import math
+
+from dwave.system import EmbeddingComposite, DWaveSampler
+
 from helper import *
 
 debug = True
 
 num = 143
 l_num = num.bit_length()
-l_p = 4
-l_q = 4
+l_p = math.ceil(math.log2(num) / 2)
+l_q = math.ceil(math.log2(num) / 2)
 
 l_block = 2
 
@@ -37,14 +40,20 @@ for i in range(l_num):
 if num_bits[0]:
     p[0] = 1
     q[0] = 1
+    coefficients.remove(Symbol("p0"))
+    coefficients.remove(Symbol("q0"))
 
-if num_bits[l_num-1]:
-    p[l_p-1] = 1
-    q[l_q-1] = 1
+if num_bits[l_num - 1]:
+    p[l_p - 1] = 1
+    q[l_q - 1] = 1
+    coefficients.remove(Symbol(f"p{l_p - 1}"))
+    coefficients.remove(Symbol(f"q{l_q - 1}"))
 
+print(p)
+print(q)
 for i in range(l_p):
     for n in range(l_q):
-        num_exp[i+n] = Add(num_exp[i+n], Mul(p[i], q[n]))
+        num_exp[i + n] = Add(num_exp[i + n], Mul(p[i], q[n]))
 
 start = 0
 while num_exp[start] == 1 or num_exp[start] == 0:
@@ -58,11 +67,10 @@ for i in range(start, l_num, l_block):
             for n in range(l_block):
                 globals()[f"c{counter}"] = symbols(f"c{counter}")
                 coefficients.append(symbols(f"c{counter}"))
-                num_exp[i+n] = Add(num_exp[i+n], symbols(f"c{counter}"))
+                num_exp[i + n] = Add(num_exp[i + n], symbols(f"c{counter}"))
                 counter += 1
     else:
         first = False
-
 
 start = 0
 while num_exp[start] == 1 or num_exp[start] == 0:
@@ -76,9 +84,9 @@ for i in range(start, l_num, l_block):
         lhs = Integer(0)
         rhs = Integer(0)
         for n in range(l_block):
-            lhs = Add(lhs, Mul(num_exp[i+n], Pow(2, n)))
+            lhs = Add(lhs, Mul(num_exp[i + n], Pow(2, n)))
             if new_counter < counter:
-                rhs = Add(rhs, Add(Mul(symbols(f"c{new_counter}"), Pow(2, 2+n)), Mul(num_bits[i+n], Pow(2, n))))
+                rhs = Add(rhs, Add(Mul(symbols(f"c{new_counter}"), Pow(2, 2 + n)), Mul(num_bits[i + n], Pow(2, n))))
                 new_counter += 1
             else:
                 rhs = Add(rhs, Mul(num_bits[i + n], Pow(2, n)))
@@ -86,7 +94,7 @@ for i in range(start, l_num, l_block):
         if last:
             rest = i + l_block
             while rest < l_num:
-                rhs = Add(rhs, Mul(num_bits[rest], Pow(2, rest-i)))
+                rhs = Add(rhs, Mul(num_bits[rest], Pow(2, rest - i)))
                 rest += 1
         eqs.append(lhs - rhs)
 
@@ -96,77 +104,122 @@ for elem in eqs:
     eq = Add(eq, Pow(elem, 2))
 
 substitutions = []
-
-a = Wild("a", properties=[lambda x: isinstance(x, Symbol)])
-b = Wild("b", properties=[lambda x: isinstance(x, Symbol)])
-x = Wild("x")
-
-query = x * a * b
-result = sorted(eq.find(query), key=sortingset, reverse=True)
-runningNumber = 1
-
-for val in result:
-    #print(val.args)
-
-    x1 = 1
-    x2 = 1
-    n = 1
-
-    for elem in val.args:
-        if isinstance(elem, Symbol):
-            if n == 1:
-                x1 = elem
-                n += 1
-            elif n == 2:
-                x2 = elem
-                n += 1
-    x3 = symbols(f"t{runningNumber}")
-    runningNumber += 1
-    substitutions.append((x1, x2, x3))
-
-substitutions = [(Symbol("p1"), Symbol("q1"), Symbol("t1")), (Symbol("p1"), Symbol("q2"), Symbol("t2")), (Symbol("p2"), Symbol("q2"), Symbol("t3")), (Symbol("p2"), Symbol("q1"), Symbol("t4"))]
-print(substitutions)
-print(eq)
+substitutions, coefficients = createSubstitutionList(eq, coefficients, p, q, debug)
 eq = eq.expand()
-#print(eq)
 
 eq = substituteExponent(eq, coefficients, debug)
 
 print(eq)
-a = Wild("a", properties=[lambda x: isinstance(x, Symbol)])
-x = Wild("x")
-for elem in substitutions:
-    print(elem)
-    query = x * a * elem[0] * elem[1]
-    result = sorted(eq.find(query), key=sortingset, reverse=True)
-    print(result)
-    x1 = elem[0]
-    x2 = elem[1]
+print("")
+print("")
 
-    x4 = elem[2]
-    while result:
+eq = twoLocalFieldReduction(eq, substitutions, debug)
 
-        for val in result:
-            x3 = 1
-            for var in val.args:
-                if isinstance(var, Symbol) and var != elem[0] and var != elem[1]:
-                    x3 = Mul(x3, var)
-
-            print(f"{x1}, {x2}, {x3}, {x4}")
-            if isinstance(val.args[0], Integer) and val.args[0] < 0:
-                eq = eq.subs(x1 * x2 * x3, (x4 * x3 + 2 * (x1 * x2 - 2 * x1 * x4 - 2 * x2 * x4 + 3 * x4)))
-            else:
-                eq = eq.subs(x1 * x2 * x3, (x4 * x3 + 2 * (x1 * x2 - 2 * x1 * x4 - 2 * x2 * x4 + 3 * x4)))
-
-            #print(eq)
-            result.remove(val)
-        #result = sorted(eq.find(query), key=sortingset, reverse=True)
-        #print(result)
-eq = eq.expand()
 print(eq)
-
+print(coefficients)
 for val in coefficients:
     eq = eq.replace(val, (1 - val) / 2)
 eq = eq.expand()
 
 print(eq)
+eq = Mul(eq, 2)
+print(eq)
+
+# local fields
+h = {}
+# couplings
+J = {}
+
+for val in eq.args:
+    if debug:
+        print(f"{val}: ")
+    # if isinstance(val, Integer):
+    # eventually bias handling
+    if isinstance(val, Mul):
+        if len(val.args) == 2:
+            if isinstance(val.args[0], Symbol):
+                if debug:
+                    print(f"1,  {val.args[0]},  {val.args[1]}")
+                J[val.args[0], val.args[1]] = 1.0
+            else:
+                if debug:
+                    print(f"{val.args[0]},  {val.args[1]}")
+                h[val.args[1]] = val.args[0]
+        elif len(val.args) == 3:
+            if debug:
+                print(f"{val.args[0]},  {val.args[1]},  {val.args[2]}")
+            J[val.args[1], val.args[2]] = val.args[0]
+
+if debug:
+    print("")
+    print(f"local Fields: {h}")
+    print(f"couplings: {J}")
+    print("")
+
+exit()
+sampler = EmbeddingComposite(DWaveSampler())
+response = sampler.sample_ising(h, J, num_reads=25, annealing_time=200)
+
+print(response)
+
+for n in range(len(response.samples())):
+    copy_p = p.copy()
+    copy_q = q.copy()
+    for i in range(len(copy_p)):
+        if isinstance(copy_p[i], Symbol):
+            if response.samples()[n][copy_p[i]] == 1:
+                copy_p[i] = 0
+            else:
+                copy_p[i] = 1
+
+    for i in range(len(copy_q)):
+        if isinstance(copy_q[i], Symbol):
+            if response.samples()[n][copy_q[i]] == 1:
+                copy_q[i] = 0
+            else:
+                copy_q[i] = 1
+
+    num_p = 0
+    num_q = 0
+    counter = 0
+    for elem in copy_p:
+        num_p += elem * 2**counter
+        counter += 1
+
+    counter = 0
+    for elem in copy_q:
+        num_q += elem * 2**counter
+        counter += 1
+
+    print(f"num: {n}, p: {num_p}, q: {num_q}")
+
+exit()
+print(response)
+print(response.samples()[0])
+for i in range(len(p)):
+    if isinstance(p[i], Symbol):
+        if response.samples()[0][p[i]] == 1:
+            p[i] = 0
+        else:
+            p[i] = 1
+
+for i in range(len(q)):
+    if isinstance(q[i], Symbol):
+        if response.samples()[0][q[i]] == 1:
+            q[i] = 0
+        else:
+            q[i] = 1
+
+num_p = 0
+num_q = 0
+counter = 0
+for elem in p:
+    num_p += elem * 2**counter
+    counter += 1
+
+counter = 0
+for elem in q:
+    num_q += elem * 2**counter
+    counter += 1
+
+print(f"p: {num_p},q: {num_q}")
